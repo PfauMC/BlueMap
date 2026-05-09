@@ -28,6 +28,8 @@ import com.github.benmanes.caffeine.cache.Cache;
 import de.bluecolored.bluemap.core.storage.GridStorage;
 import de.bluecolored.bluemap.core.storage.ItemStorage;
 import de.bluecolored.bluemap.core.storage.KeyedMapStorage;
+import de.bluecolored.bluemap.core.storage.cache.CoalescingGridStorage;
+import de.bluecolored.bluemap.core.storage.cache.CoalescingItemStorage;
 import de.bluecolored.bluemap.core.storage.compression.Compression;
 import de.bluecolored.bluemap.core.storage.sql.commandset.CommandSet;
 import de.bluecolored.bluemap.core.util.Caches;
@@ -56,7 +58,10 @@ public class SQLMapStorage extends KeyedMapStorage {
         ItemStorage item = itemStorages.getIfPresent(key);
         if (item != null) return item;
 
-        return itemStorages.get(key, k -> new SQLItemStorage(sql, mapId, key, compression));
+        return itemStorages.get(key, k -> {
+            ItemStorage bare = new SQLItemStorage(sql, mapId, k, compression);
+            return new CoalescingItemStorage(bare);
+        });
     }
 
     @Override
@@ -64,7 +69,10 @@ public class SQLMapStorage extends KeyedMapStorage {
         GridStorage grid = gridStorages.getIfPresent(key);
         if (grid != null) return grid;
 
-        return gridStorages.get(key, k -> new SQLGridStorage(sql, mapId, key, compression));
+        return gridStorages.get(key, k -> {
+            GridStorage bare = new SQLGridStorage(sql, mapId, k, compression);
+            return new CoalescingGridStorage(bare, mapId + ":" + k.getFormatted());
+        });
     }
 
     @Override

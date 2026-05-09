@@ -22,35 +22,38 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-package de.bluecolored.bluemap.common.config.storage;
+package de.bluecolored.bluemap.core.storage.s3;
 
-import de.bluecolored.bluemap.core.util.Key;
-import de.bluecolored.bluemap.core.util.Keyed;
-import de.bluecolored.bluemap.core.util.Registry;
-import lombok.Getter;
-import lombok.RequiredArgsConstructor;
+import java.io.IOException;
 
-public interface StorageType extends Keyed {
+public class S3Exception extends IOException {
 
-    StorageType FILE = new Impl(Key.bluemap("file"), FileConfig.class);
-    StorageType SQL = new Impl(Key.bluemap("sql"), SQLConfig.class);
-    StorageType S3 = new Impl(Key.bluemap("s3"), S3Config.class);
+    private final String code;
+    private final String requestId;
+    private final int httpStatus;
 
-    Registry<StorageType> REGISTRY = new Registry<>(
-            FILE,
-            SQL,
-            S3
-    );
-
-    Class<? extends StorageConfig> getConfigType();
-
-    @RequiredArgsConstructor
-    @Getter
-    class Impl implements StorageType {
-
-        private final Key key;
-        private final Class<? extends StorageConfig> configType;
-
+    public S3Exception(String code, String message, String requestId, int httpStatus) {
+        super(message);
+        this.code = code;
+        this.requestId = requestId;
+        this.httpStatus = httpStatus;
     }
 
+    public S3Exception(String code, String message, String requestId, int httpStatus, Throwable cause) {
+        super(message, cause);
+        this.code = code;
+        this.requestId = requestId;
+        this.httpStatus = httpStatus;
+    }
+
+    public String getCode() { return code; }
+
+    public String getRequestId() { return requestId; }
+
+    public int getHttpStatus() { return httpStatus; }
+
+    @Override
+    public String getMessage() {
+        return code + ": " + super.getMessage() + " (RequestId=" + requestId + ", status=" + httpStatus + ")";
+    }
 }
