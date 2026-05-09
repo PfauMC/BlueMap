@@ -27,7 +27,11 @@ package de.bluecolored.bluemap.core.map.lowres;
 import com.flowpowered.math.vector.Vector2i;
 import de.bluecolored.bluemap.core.util.math.Color;
 
+import javax.imageio.IIOImage;
 import javax.imageio.ImageIO;
+import javax.imageio.ImageWriteParam;
+import javax.imageio.ImageWriter;
+import javax.imageio.stream.ImageOutputStream;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.io.InputStream;
@@ -93,7 +97,22 @@ public class LowresTile {
     public void save(OutputStream out) throws IOException {
         lock.writeLock().lock();
         try {
-            ImageIO.write(texture, "png", out);
+            int w = texture.getWidth();
+            int h = texture.getHeight();
+            BufferedImage rgb = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
+            rgb.setRGB(0, 0, w, h, texture.getRGB(0, 0, w, h, null, 0, w), 0, w);
+
+            ImageWriter writer = ImageIO.getImageWritersByFormatName("png").next();
+            try (ImageOutputStream ios = ImageIO.createImageOutputStream(out)) {
+                writer.setOutput(ios);
+                ImageWriteParam param = writer.getDefaultWriteParam();
+                param.setCompressionMode(ImageWriteParam.MODE_EXPLICIT);
+                param.setCompressionType("Deflate");
+                param.setCompressionQuality(0.0f);
+                writer.write(null, new IIOImage(rgb, null, null), param);
+            } finally {
+                writer.dispose();
+            }
         } finally {
             lock.writeLock().unlock();
         }
