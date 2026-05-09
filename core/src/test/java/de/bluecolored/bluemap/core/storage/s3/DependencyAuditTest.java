@@ -22,35 +22,33 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-package de.bluecolored.bluemap.common.config.storage;
+package de.bluecolored.bluemap.core.storage.s3;
 
-import de.bluecolored.bluemap.core.util.Key;
-import de.bluecolored.bluemap.core.util.Keyed;
-import de.bluecolored.bluemap.core.util.Registry;
-import lombok.Getter;
-import lombok.RequiredArgsConstructor;
+import org.junit.jupiter.api.Test;
 
-public interface StorageType extends Keyed {
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
-    StorageType FILE = new Impl(Key.bluemap("file"), FileConfig.class);
-    StorageType SQL = new Impl(Key.bluemap("sql"), SQLConfig.class);
-    StorageType S3 = new Impl(Key.bluemap("s3"), S3Config.class);
+class DependencyAuditTest {
 
-    Registry<StorageType> REGISTRY = new Registry<>(
-            FILE,
-            SQL,
-            S3
-    );
-
-    Class<? extends StorageConfig> getConfigType();
-
-    @RequiredArgsConstructor
-    @Getter
-    class Impl implements StorageType {
-
-        private final Key key;
-        private final Class<? extends StorageConfig> configType;
-
+    @Test
+    void noForbiddenSdkClassesOnRuntimeClasspath() {
+        ClassLoader classLoader = getClass().getClassLoader();
+        String[] forbidden = {
+            "software.amazon.awssdk.services.s3.S3Client",
+            "software.amazon.awssdk.core.SdkClient",
+            "com.amazonaws.services.s3.AmazonS3",
+            "com.amazonaws.AmazonClientException",
+            "io.minio.MinioClient",
+            "io.minio.S3Base",
+            "okhttp3.OkHttpClient",
+            "okhttp3.Call",
+            "org.apache.http.client.HttpClient",
+            "org.apache.hc.client5.http.classic.HttpClient"
+        };
+        for (String className : forbidden) {
+            assertThrows(ClassNotFoundException.class,
+                    () -> Class.forName(className, false, classLoader),
+                    "Expected " + className + " to be absent from the runtime classpath");
+        }
     }
-
 }

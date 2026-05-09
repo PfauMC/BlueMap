@@ -5,6 +5,7 @@ bstats = "2.2.1"
 configurate = "4.1.2"
 junit = "6.1.0-M1"
 spongegradle = "2.2.0"
+testcontainers = "1.21.4"
 
 [libraries]
 adventure-api = { module = "net.kyori:adventure-api", version.ref = "adventure" }
@@ -35,6 +36,8 @@ junit-jupiter-api = { module = "org.junit.jupiter:junit-jupiter-api" }
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" }
 lombok = { module = "org.projectlombok:lombok", version = "1.18.42" }
 lz4 = { module = "at.yawk.lz4:lz4-java", version = "1.8.1" }
+testcontainers-minio = { module = "org.testcontainers:minio", version.ref = "testcontainers" }
+testcontainers-junit-jupiter = { module = "org.testcontainers:junit-jupiter", version.ref = "testcontainers" }
 
 [plugins]
 cursegradle = { id = "com.matthewprenger.cursegradle", version = "1.4.0" }

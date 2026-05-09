@@ -12,6 +12,9 @@ dependencies {
     api ( libs.configurate.hocon )
     api ( libs.configurate.gson )
     api ( libs.lz4 )
+
+    testImplementation ( libs.testcontainers.minio )
+    testImplementation ( libs.testcontainers.junit.jupiter )
 }
 
 tasks.register("zipResourceExtensions", type = Zip::class) {
@@ -55,3 +58,26 @@ publishing {
         }
     }
 }
+
+tasks.register("checkS3RuntimeDependencies") {
+    group = "verification"
+    description = "Fails if AWS SDK, MinIO client, or third-party HTTP libraries appear on runtimeClasspath."
+    val forbidden = listOf(
+        "software.amazon.awssdk", "com.amazonaws", "io.minio",
+        "com.squareup.okhttp", "com.squareup.okhttp3", "com.squareup.okio",
+        "okhttp3", "org.apache.httpcomponents"
+    )
+    doLast {
+        val rt = configurations.getByName("runtimeClasspath")
+        val matches = rt.resolvedConfiguration.resolvedArtifacts
+            .map { it.moduleVersion.id.toString() }
+            .filter { id -> forbidden.any { id.startsWith(it + ":") || id.contains(":" + it + ":") } }
+        if (matches.isNotEmpty()) {
+            throw GradleException(
+                "Forbidden runtime dependency on the S3 storage path:\n  " + matches.joinToString("\n  ") +
+                "\nThe S3 backend is required to use only the JDK standard library."
+            )
+        }
+    }
+}
+tasks.named("check") { dependsOn("checkS3RuntimeDependencies") }

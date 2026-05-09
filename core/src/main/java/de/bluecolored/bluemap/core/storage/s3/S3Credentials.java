@@ -22,35 +22,12 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-package de.bluecolored.bluemap.common.config.storage;
+package de.bluecolored.bluemap.core.storage.s3;
 
-import de.bluecolored.bluemap.core.util.Key;
-import de.bluecolored.bluemap.core.util.Keyed;
-import de.bluecolored.bluemap.core.util.Registry;
-import lombok.Getter;
-import lombok.RequiredArgsConstructor;
+public record S3Credentials(String accessKeyId, String secretAccessKey, String region, String service) {
 
-public interface StorageType extends Keyed {
-
-    StorageType FILE = new Impl(Key.bluemap("file"), FileConfig.class);
-    StorageType SQL = new Impl(Key.bluemap("sql"), SQLConfig.class);
-    StorageType S3 = new Impl(Key.bluemap("s3"), S3Config.class);
-
-    Registry<StorageType> REGISTRY = new Registry<>(
-            FILE,
-            SQL,
-            S3
-    );
-
-    Class<? extends StorageConfig> getConfigType();
-
-    @RequiredArgsConstructor
-    @Getter
-    class Impl implements StorageType {
-
-        private final Key key;
-        private final Class<? extends StorageConfig> configType;
-
+    @Override
+    public String toString() {
+        return "S3Credentials[accessKeyId=" + accessKeyId + ", secretAccessKey=***, region=" + region + ", service=" + service + "]";
     }
-
 }
