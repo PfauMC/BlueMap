@@ -98,13 +98,18 @@ public class HiresModelManager {
 
     /**
      * Un-renders a tile.
-     * The hires tile is deleted and the tileMetaConsumer (lowres) is updated with default values in the tiles area.
+     * If {@code deleteHires} is true the hires tile is deleted from storage; in both cases
+     * the {@code tileMetaConsumer} (lowres) is updated with default values in the tile's area.
+     * Honors the map-config promise that disabling the hires layer does not remove existing
+     * tiles, and avoids hammering remote storage with deletes for tiles that were never written.
      */
-    public void unrender(Vector2i tile, TileMetaConsumer tileMetaConsumer) {
-        try {
-            storage.delete(tile.getX(), tile.getY());
-        } catch (IOException ex) {
-            Logger.global.logError("Failed to delete hires model: " + tile, ex);
+    public void unrender(Vector2i tile, TileMetaConsumer tileMetaConsumer, boolean deleteHires) {
+        if (deleteHires) {
+            try {
+                storage.delete(tile.getX(), tile.getY());
+            } catch (IOException ex) {
+                Logger.global.logError("Failed to delete hires model: " + tile, ex);
+            }
         }
 
         Color color = new Color();

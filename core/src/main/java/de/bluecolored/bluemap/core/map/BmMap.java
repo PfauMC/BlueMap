@@ -146,7 +146,7 @@ public class BmMap {
     }
 
     public void unrenderTile(Vector2i tile) {
-        hiresModelManager.unrender(tile, lowresTileManager);
+        hiresModelManager.unrender(tile, lowresTileManager, mapSettings.isSaveHiresLayer());
     }
 
     public synchronized boolean save(long minTimeSinceLastSave) {

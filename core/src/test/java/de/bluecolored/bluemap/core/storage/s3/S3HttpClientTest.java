@@ -176,6 +176,39 @@ class S3HttpClientTest {
     }
 
     @Test
+    void retriesOn409OperationAbortedThenSucceeds() throws IOException {
+        AtomicInteger callCount = new AtomicInteger();
+        server.createContext("/" + TEST_BUCKET + "/conflict.txt", exchange -> {
+            int call = callCount.incrementAndGet();
+            if (call <= 2) {
+                sendResponse(exchange, 409, S3_ERROR_XML("OperationAborted",
+                        "A conflicting conditional operation is currently in progress against this resource.", "rqAbort"));
+            } else {
+                sendResponse(exchange, 200, "");
+            }
+        });
+
+        assertDoesNotThrow(() -> client.putObject("conflict.txt", new byte[]{1, 2, 3}, "text/plain"));
+        assertEquals(3, callCount.get());
+    }
+
+    @Test
+    void doesNotRetry409PreconditionFailed() throws IOException {
+        AtomicInteger callCount = new AtomicInteger();
+        server.createContext("/" + TEST_BUCKET + "/precond.txt", exchange -> {
+            callCount.incrementAndGet();
+            sendResponse(exchange, 409, S3_ERROR_XML("PreconditionFailed",
+                    "At least one of the preconditions you specified did not hold.", "rqPre"));
+        });
+
+        S3Exception ex = assertThrows(S3Exception.class,
+                () -> client.putObject("precond.txt", new byte[]{1}, "text/plain"));
+        assertEquals(409, ex.getHttpStatus());
+        assertEquals("PreconditionFailed", ex.getCode());
+        assertEquals(1, callCount.get());
+    }
+
+    @Test
     void failsAfterMaxAttemptsOn5xx() throws IOException {
         AtomicInteger callCount = new AtomicInteger();
         server.createContext("/" + TEST_BUCKET + "/always-500.txt", exchange -> {

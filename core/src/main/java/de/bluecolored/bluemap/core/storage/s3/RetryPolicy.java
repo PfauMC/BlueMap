@@ -50,6 +50,11 @@ public final class RetryPolicy {
     public Decision classifyHttp(int statusCode, String xmlErrorCode) {
         if (statusCode >= 200 && statusCode < 300) return Decision.SUCCESS;
         if (statusCode == 503 && "SlowDown".equals(xmlErrorCode)) return Decision.RETRY;
+        // AWS documents OperationAborted as transient — typically raised when concurrent
+        // operations on the same key collide, or when the backend is internally rebalancing.
+        // Prescribed handling is retry with exponential backoff. Scoped strictly to this
+        // code so other 409s (e.g. PreconditionFailed from If-Match) still fail fast.
+        if (statusCode == 409 && "OperationAborted".equals(xmlErrorCode)) return Decision.RETRY;
         if (statusCode >= 500 && statusCode < 600) return Decision.RETRY;
         return Decision.FAIL_NON_RETRYABLE;
     }
