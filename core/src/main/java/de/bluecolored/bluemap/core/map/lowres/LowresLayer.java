@@ -39,6 +39,7 @@ import org.jetbrains.annotations.Nullable;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.Iterator;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
@@ -60,7 +61,17 @@ public class LowresLayer {
     private final LoadingCache<Vector2i, LowresTile> tileCache;
     @Nullable private final LowresLayer nextLayer;
 
-    private final Map<Vector2i, LowresTile> pendingChanges;
+    /**
+     * Marker held in {@link #pendingChanges} for each tile awaiting flush.
+     * A fresh instance is created on every {@link #markDirty} call; the
+     * {@link ConcurrentHashMap#remove(Object, Object)} compare-and-remove in
+     * {@link #save()} only evicts the entry if no newer marker has replaced it,
+     * preventing the unconditional-remove race that would otherwise drop pixel
+     * writes landing between snapshot and eviction.
+     */
+    private record PendingMarker(LowresTile tile, long version) {}
+
+    private final Map<Vector2i, PendingMarker> pendingChanges;
 
     public LowresLayer(
             GridStorage storage, Grid tileGrid, int lodFactor,
@@ -89,15 +100,26 @@ public class LowresLayer {
         this.pendingChanges = new ConcurrentHashMap<>();
     }
 
-    public void save() {
-        pendingChanges.entrySet().removeIf(entry -> saveTile(entry.getKey(), entry.getValue()));
+    public synchronized void save() {
+        if (pendingChanges.isEmpty()) return;
+
+        Iterator<Map.Entry<Vector2i, PendingMarker>> it = pendingChanges.entrySet().iterator();
+        while (it.hasNext()) {
+            Map.Entry<Vector2i, PendingMarker> entry = it.next();
+            Vector2i tilePos = entry.getKey();
+            PendingMarker marker = entry.getValue();
+            if (saveTile(tilePos, marker)) {
+                pendingChanges.remove(tilePos, marker);
+            }
+        }
+
         if (pendingChanges.size() >= DISCARD_THRESHOLD) {
             Logger.global.logDebug("Discarding changes of " + pendingChanges.size() + " lowres-tiles that failed to save!");
             pendingChanges.clear();
         }
     }
 
-    public void discard() {
+    public synchronized void discard() {
         pendingChanges.clear();
         tileCache.invalidateAll();
         tileWeakInstanceCache.invalidateAll();
@@ -114,7 +136,8 @@ public class LowresLayer {
         return new LowresTile(tileGrid.getGridSize());
     }
 
-    private boolean saveTile(Vector2i tilePos, LowresTile tile) {
+    private boolean saveTile(Vector2i tilePos, PendingMarker marker) {
+        LowresTile tile = marker.tile();
 
         // check if storage is closed
         if (storage.isClosed()){
@@ -122,15 +145,20 @@ public class LowresLayer {
             return false;
         }
 
-        // save the tile
+        // save the tile; snapshot version is captured under the tile's writeLock so the
+        // PUT is fired with a coherent texture-and-version pair
+        long versionAtSnapshot;
         try (OutputStream out = storage.write(tilePos.getX(), tilePos.getY())) {
-            tile.save(out);
+            versionAtSnapshot = tile.save(out);
         } catch (IOException e) {
             Logger.global.logError("Failed to save tile " + tilePos + " (lod: " + lod + ")", e);
             return false;
         }
 
-        if (this.nextLayer == null) return true;
+        // tile was already clean — safe to evict from pending without further checks
+        if (versionAtSnapshot < 0) return true;
+
+        if (this.nextLayer == null) return tile.markSaved(versionAtSnapshot);
 
         // write to next LOD (prepare for the most confusing grid-math you will ever see)
         Color averageColor = new Color();
@@ -176,38 +204,39 @@ public class LowresLayer {
             }
         }
 
-        return true;
-    }
-
-    private LowresTile accessTile(int x, int z) {
-        Vector2i tilePos = VECTOR_2_I_CACHE.get(x, z);
-        LowresTile tile = tileCache.get(tilePos);
-
-        if (pendingChanges.size() >= MAX_PENDING) save();
-        pendingChanges.put(tilePos, tile);
-
-        return tile;
+        return tile.markSaved(versionAtSnapshot);
     }
 
     void set(int cellX, int cellZ, int pixelX, int pixelZ, Color color, int height, int blockLight) {
-        accessTile(cellX, cellZ)
-                .set(pixelX, pixelZ, color, height, blockLight);
+        writePixel(cellX, cellZ, pixelX, pixelZ, color, height, blockLight);
 
         // for seamless edges
         if (pixelX == 0) {
-            accessTile(cellX - 1, cellZ)
-                    .set(tileGrid.getGridSize().getX(), pixelZ, color, height, blockLight);
+            writePixel(cellX - 1, cellZ, tileGrid.getGridSize().getX(), pixelZ, color, height, blockLight);
         }
 
         if (pixelZ == 0) {
-            accessTile(cellX, cellZ - 1)
-                    .set(pixelX, tileGrid.getGridSize().getY(), color, height, blockLight);
+            writePixel(cellX, cellZ - 1, pixelX, tileGrid.getGridSize().getY(), color, height, blockLight);
         }
 
         if (pixelX == 0 && pixelZ == 0) {
-            accessTile(cellX - 1, cellZ - 1)
-                    .set(tileGrid.getGridSize().getX(), tileGrid.getGridSize().getY(), color, height, blockLight);
+            writePixel(cellX - 1, cellZ - 1, tileGrid.getGridSize().getX(), tileGrid.getGridSize().getY(), color, height, blockLight);
         }
+    }
+
+    private void writePixel(int cellX, int cellZ, int pixelX, int pixelZ, Color color, int height, int blockLight) {
+        Vector2i tilePos = VECTOR_2_I_CACHE.get(cellX, cellZ);
+        LowresTile tile = tileCache.get(tilePos);
+        // pixel-write MUST precede mark-dirty: if mark were first, a concurrent save() could
+        // snapshot the texture before the pixel lands and then evict the entry, leaving the
+        // pixel untracked in the in-memory texture and never flushed
+        tile.set(pixelX, pixelZ, color, height, blockLight);
+        markDirty(tilePos, tile);
+    }
+
+    private void markDirty(Vector2i tilePos, LowresTile tile) {
+        if (pendingChanges.size() >= MAX_PENDING) save();
+        pendingChanges.put(tilePos, new PendingMarker(tile, tile.dirtyVersion()));
     }
 
 }

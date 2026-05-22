@@ -36,6 +36,7 @@ import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 public class LowresTile {
@@ -46,6 +47,9 @@ public class LowresTile {
 
     private final BufferedImage texture;
     private final Vector2i size;
+
+    private final AtomicLong dirtyVersion = new AtomicLong(0);
+    private long savedVersion = 0;
 
     public LowresTile(Vector2i tileSize) {
         this.size = tileSize.add(1, 1); // add 1 for seamless edges
@@ -74,6 +78,7 @@ public class LowresTile {
                             ((blockLight << 16) & 0x00FF0000) |
                             0xFF000000
             );
+            dirtyVersion.incrementAndGet();
         } finally {
             lock.readLock().unlock();
         }
@@ -94,9 +99,22 @@ public class LowresTile {
         return (texture.getRGB(x, size.getY() + z) & 0x00FF0000) >> 16;
     }
 
-    public void save(OutputStream out) throws IOException {
+    /** Monotonic counter bumped on every {@link #set} — used by callers to detect concurrent writes during a save. */
+    public long dirtyVersion() {
+        return dirtyVersion.get();
+    }
+
+    /**
+     * Serializes the current texture to {@code out} and returns the dirty-version
+     * snapshot that was just written, or {@code -1} if the tile has no unsaved
+     * changes since the last successful {@link #markSaved(long)}.
+     */
+    public long save(OutputStream out) throws IOException {
         lock.writeLock().lock();
         try {
+            long currentVersion = dirtyVersion.get();
+            if (currentVersion == savedVersion) return -1;
+
             int w = texture.getWidth();
             int h = texture.getHeight();
             BufferedImage rgb = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
@@ -113,6 +131,24 @@ public class LowresTile {
             } finally {
                 writer.dispose();
             }
+
+            return currentVersion;
+        } finally {
+            lock.writeLock().unlock();
+        }
+    }
+
+    /**
+     * Acknowledges that the snapshot returned by {@link #save(OutputStream)} at
+     * {@code version} is now durable. Returns true iff no writes happened
+     * between snapshot and acknowledgment — i.e., the tile is now clean and can
+     * be evicted from the pending-changes set.
+     */
+    public boolean markSaved(long version) {
+        lock.writeLock().lock();
+        try {
+            if (version > savedVersion) savedVersion = version;
+            return dirtyVersion.get() == savedVersion;
         } finally {
             lock.writeLock().unlock();
         }
