@@ -79,9 +79,23 @@ public class S3HttpClient implements Closeable {
     }
 
     public byte[] putObject(String key, byte[] body, String contentType) throws IOException {
+        return putObject(key, body, contentType, null);
+    }
+
+    /**
+     * PUT an object with an optional {@code Content-Encoding} response header
+     * persisted as S3 metadata. When the body is pre-compressed at the storage
+     * boundary (e.g. gzip), passing the encoding here lets a CDN serve the
+     * object under its plain name with the encoding header set, so browsers
+     * decompress transparently — instead of relying on a {@code .gz} key suffix.
+     */
+    public byte[] putObject(String key, byte[] body, String contentType, @Nullable String contentEncoding) throws IOException {
         URI uri = buildUri(key, null);
         Map<String, List<String>> extraHeaders = new LinkedHashMap<>();
         extraHeaders.put("Content-Type", List.of(contentType != null ? contentType : "application/octet-stream"));
+        if (contentEncoding != null && !contentEncoding.isEmpty()) {
+            extraHeaders.put("Content-Encoding", List.of(contentEncoding));
+        }
         HttpResponse<byte[]> resp = sendSigned("PUT", uri, extraHeaders, body, false);
         if (resp.statusCode() < 200 || resp.statusCode() >= 300) {
             classifyAndThrow(resp);

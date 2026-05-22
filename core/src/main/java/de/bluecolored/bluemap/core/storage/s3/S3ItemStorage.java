@@ -52,8 +52,9 @@ public class S3ItemStorage implements ItemStorage {
     @Override
     public OutputStream write() throws IOException {
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        String contentEncoding = S3GridStorage.httpContentEncoding(compression);
         return new OnCloseOutputStream(compression.compress(bytes),
-                () -> http.putObject(fullKey, bytes.toByteArray(), contentType));
+                () -> http.putObject(fullKey, bytes.toByteArray(), contentType, contentEncoding));
     }
 
     @Override
