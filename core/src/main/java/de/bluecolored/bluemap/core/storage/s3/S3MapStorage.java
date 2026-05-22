@@ -135,12 +135,14 @@ public class S3MapStorage extends KeyedMapStorage {
 
     private ItemStorage buildItemStorage(Key key, Compression compression) {
         String name = key.getValue();
+        // Key always ends with the file-format extension only. Compression is
+        // signalled to clients via a Content-Encoding header on PUT, not via a
+        // ".gz"-style key suffix, so a CDN sitting in front of the bucket can
+        // serve the object under its plain name and let the browser decompress
+        // transparently.
         String baseSuffix = name.startsWith("asset/") ? "" : ".json";
-        String fullSuffix = (compression == Compression.NONE || compression == null)
-                ? baseSuffix
-                : baseSuffix + compression.getFileSuffix();
         String contentType = name.startsWith("asset/") ? "application/octet-stream" : "application/json";
-        String fullKey = S3ItemStorage.itemKey(prefix, mapId, name, fullSuffix);
+        String fullKey = S3ItemStorage.itemKey(prefix, mapId, name, baseSuffix);
         Compression effectiveCompression = compression != null ? compression : Compression.NONE;
         ItemStorage bare = new S3ItemStorage(http, fullKey, effectiveCompression, contentType);
         return new CoalescingItemStorage(bare);
@@ -148,24 +150,58 @@ public class S3MapStorage extends KeyedMapStorage {
 
     private GridStorage buildGridStorage(Key key, Compression compression) {
         String section = key.getValue();
-        String suffix = gridSuffix(section, compression);
+        // Tile sections are remapped to the path layout the webapp constructs
+        // its tile URLs from (TileLoader uses "tiles/0/", LowresTileLoader uses
+        // "tiles/<lod>/" with lod=i+1). Doing the remap on the storage side
+        // keeps the rest of BlueMap's render code untouched and lets a CDN in
+        // front of the bucket serve tiles directly under the names the browser
+        // requests.
+        String storageSection = remapSectionForWebapp(section);
+        String suffix = gridSuffix(section);
         String contentType = section.startsWith("lowres/") ? "image/png" : "application/octet-stream";
         Compression effectiveCompression = compression != null ? compression : Compression.NONE;
-        GridStorage bare = new S3GridStorage(http, prefix, mapId, section, suffix, effectiveCompression, contentType);
-        String namespace = S3GridStorage.gridSectionPrefix(prefix, mapId, section);
+        GridStorage bare = new S3GridStorage(http, prefix, mapId, storageSection, suffix, effectiveCompression, contentType);
+        String namespace = S3GridStorage.gridSectionPrefix(prefix, mapId, storageSection);
         return new CoalescingGridStorage(bare, namespace);
     }
 
-    private static String gridSuffix(String section, Compression compression) {
+    /**
+     * Remaps render-side section names to the path segment the webapp expects.
+     * Render code calls {@code KeyedMapStorage.lowresTiles(lod)} with {@code lod=1..N}
+     * (and uses {@code hiresTiles()} for the hires layer), producing sections
+     * {@code lowres/1}, {@code lowres/2}, ..., {@code hires}. The webapp's URL builder
+     * uses the same index space but a flat {@code tiles/<lod>} path:
+     * <ul>
+     *   <li>{@code hires} → {@code tiles/0} (TileLoader.js → {@code tiles/0/...prbm})</li>
+     *   <li>{@code lowres/<n>} → {@code tiles/<n>} (LowresTileLoader.js, {@code lod=n})</li>
+     *   <li>everything else (e.g. {@code tile-state}, {@code chunk-state}) is left as-is —
+     *       these are internal, never fetched by the webapp.</li>
+     * </ul>
+     */
+    private static String remapSectionForWebapp(String section) {
+        if ("hires".equals(section)) return "tiles/0";
+        if (section.startsWith("lowres/")) {
+            try {
+                int lod = Integer.parseInt(section.substring("lowres/".length()));
+                return "tiles/" + lod;
+            } catch (NumberFormatException ignored) {
+                // Fall through to unchanged section if the suffix isn't an int.
+            }
+        }
+        return section;
+    }
+
+    /**
+     * File-format extension for the given (render-side) grid section. Compression is no
+     * longer baked into the key — see {@link #buildItemStorage} for rationale.
+     */
+    private static String gridSuffix(String section) {
         if (section.startsWith("lowres/")) {
             return ".png";
         }
         if ("hires".equals(section) || section.startsWith("hires/")) {
-            return ".prbm" + (compression != null ? compression.getFileSuffix() : "");
+            return ".prbm";
         }
-        if ("tile-state".equals(section) || "chunk-state".equals(section)) {
-            return compression != null ? compression.getFileSuffix() : ".gz";
-        }
-        return compression != null ? compression.getFileSuffix() : "";
+        return "";
     }
 }

@@ -69,8 +69,20 @@ public class S3GridStorage implements GridStorage {
     @Override
     public OutputStream write(int x, int z) throws IOException {
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        String contentEncoding = httpContentEncoding(compression);
         return new OnCloseOutputStream(compression.compress(bytes),
-                () -> http.putObject(gridKey(prefix, mapId, section, x, z, suffix), bytes.toByteArray(), contentType));
+                () -> http.putObject(gridKey(prefix, mapId, section, x, z, suffix), bytes.toByteArray(), contentType, contentEncoding));
+    }
+
+    /** Maps a {@link Compression} to its HTTP {@code Content-Encoding} value, or null if none applies. */
+    static @Nullable String httpContentEncoding(Compression compression) {
+        if (compression == null || compression == Compression.NONE) return null;
+        String id = compression.getId();
+        // gzip / deflate / zstd map directly to standard HTTP encodings; lz4 has no
+        // standardised encoding, so we omit the header and the file ends up readable
+        // only by BlueMap's own webserver (which decodes via the storage abstraction).
+        if ("gzip".equals(id) || "deflate".equals(id) || "zstd".equals(id)) return id;
+        return null;
     }
 
     @Override
