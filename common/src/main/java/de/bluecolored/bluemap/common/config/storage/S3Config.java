@@ -116,10 +116,13 @@ public class S3Config extends StorageConfig {
             }
         }
 
+        // S3 (and S3-compatible servers) require a Content-Length header on uploads;
+        // HTTP/1.1 always emits it for fixed-length bodies. Negotiating HTTP/2 via ALPN
+        // against some endpoints/proxies leads to "MissingContentLength" rejections.
         HttpClient httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofMillis(connectTimeoutMs))
                 .followRedirects(HttpClient.Redirect.NEVER)
-                .version(HttpClient.Version.HTTP_2)
+                .version(HttpClient.Version.HTTP_1_1)
                 .build();
 
         SigV4Signer signer = new SigV4Signer(new S3Credentials(accessKey, secretKey, region, "s3"));
